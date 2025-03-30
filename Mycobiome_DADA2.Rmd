@@ -1,0 +1,186 @@
+ ---
+ title: "DADA2 Pipeline for ITS Metabarcoding"
+ authors: 
+   - name: "Rachelle Fernández-Vargas"
+    affiliation: "University of Costa Rica"
+  - name: "Keilor Rojas-Jiménez"
+    affiliation: "University of Costa Rica"
+ description: |
+   DADA2 workflow for processing Illumina paired-end ITS fungal sequences.
+   Processes raw FASTQ to ASV table with taxonomy.
+ inputs:
+   - Raw FASTQ files 
+   - UNITE database v9.0: sh_general_release_dynamic_25.07.2023.fasta    
+    "https://doi.plutof.ut.ee/doi/10.15156/BIO/2938067"
+ outputs:
+   - seqtab.nochim.csv (ASV table)
+   - micobiome.csv (Taxonomy table)
+   - track.csv (Read tracking)
+   
+ repository: "https://github.com/vrachfer00/MycobiomeAnalysis.git"
+ ---
+
+
+Set working directory (update to match your data location)
+```{r}
+setwd("D:/Sequences/...") 
+```
+
+Create a new directory to store extracted ITS sequences
+```{r}
+dir.create("1Extracted-ITS")
+```
+
+Find all the FASTQ files matching the specific naming pattern
+```{r}
+zip <- list.files(path = getwd(), pattern = "[abc]_[1-2].fastq.gz", full.names = TRUE, recursive = TRUE)
+zip
+```
+
+Move extracted sequences to the newly created directory
+```{r}
+library(filesstrings)
+for (i in zip) file.move(zip, "1Extracted-ITS")
+```
+
+Install BiocManager and the required packages
+```{r}
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install(c("Biostrings", "ShortRead", "dada2"))
+```
+
+Load required packages for sequence analysis
+```{r}
+library(dada2); packageVersion("dada2")
+library(ShortRead)
+library(Biostrings)
+```
+
+Define the path where extracted sequences are stored
+```{r}
+path <- "D:/Sequences/.../1Extracted-ITS" # Update accordingly
+list.files(path) # Check that files are correctly listed
+```
+
+Sort and assign forward (R1) and reverse (R2) reads
+```{r}
+fnFs <- sort(list.files(path, pattern="_1.fastq.gz", full.names = TRUE))
+fnRs <- sort(list.files(path, pattern="_2.fastq.gz", full.names = TRUE))
+```
+
+Extract sample names (assuming names are the first part of the file names)
+```{r}
+sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 1)
+sample.names
+```
+
+Visualize the quality profiles of the first two samples
+```{r}
+plotQualityProfile(fnFs[1:2])
+plotQualityProfile(fnRs[1:2])
+
+# Save quality plots automatically
+pdf("quality_profiles.pdf", width=8, height=6)
+plotQualityProfile(fnFs[1:2]) + ggtitle("Forward Reads")
+plotQualityProfile(fnRs[1:2]) + ggtitle("Reverse Reads")
+dev.off()
+```
+
+Define file paths for filtered sequences
+```{r}
+filtFs <- file.path(path, "filtered", paste0(sample.names, "_F_filt.fastq.gz"))
+filtRs <- file.path(path, "filtered", paste0(sample.names, "_R_filt.fastq.gz"))
+names(filtFs) <- sample.names
+names(filtRs) <- sample.names
+```
+
+Define primer sequences (not used in this case, as sequences are pre-trimmed)
+```{r}
+FWD <- "CTTGGTCATTTAGAGGAAGTAA" # ITS1-1F primer
+REV <- "GCTGCGTTCTTCATCGATGC"
+```
+
+Filter sequences based on quality and length
+```{r}
+## FILTERING PARAMETERS:
+# truncLen = 220bp for both forward/reverse reads
+# minLen = 180bp minimum length
+# maxEE = 2 (Fwd), 4 (Rev) maximum expected errors
+# truncQ = 2 quality score threshold for truncation
+# Rationale: Based on quality profiles showing quality drop after 220bp
+out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(220,220),
+                     minLen = 180, maxN=0, maxEE=c(2,4), truncQ=2, rm.phix=TRUE,
+                     compress=TRUE, multithread=FALSE) 
+head(out)
+```
+
+Learn error rates for forward and reverse reads
+```{r}
+errF <- learnErrors(filtFs, multithread=TRUE)
+errR <- learnErrors(filtRs, multithread=TRUE)
+plotErrors(errF, nominalQ=TRUE) # Visualize error model
+```
+
+Perform ASV inference (denoising step)
+```{r}
+dadaFs <- dada(filtFs, err=errF, multithread=TRUE)
+dadaRs <- dada(filtRs, err=errR, multithread=TRUE)
+dadaFs[[1]] # View first denoised sample
+```
+
+Merge forward and reverse reads
+```{r}
+mergers <- mergePairs(dadaFs, filtFs, dadaRs, filtRs, verbose=TRUE)
+head(mergers[[1]]) # Inspect merged sequences
+```
+
+Construct an amplicon sequence variant (ASV) table
+```{r}
+seqtab <- makeSequenceTable(mergers)
+dim(seqtab) # Check dimensions
+```
+
+Examine sequence length distribution
+```{r}
+table(nchar(getSequences(seqtab)))
+```
+
+Remove chimeric sequences to improve accuracy
+```{r}
+seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
+dim(seqtab.nochim) # Compare dimensions before and after chimera removal
+```
+
+Save the non-chimeric sequence table as a CSV file
+```{r}
+write.csv2(seqtab.nochim, "seqtab.nochim.csv")
+```
+
+# Track sequence loss at each step of the pipeline
+```{r}
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out, sapply(dadaFs, getN), sapply(dadaRs, getN), sapply(mergers, getN), rowSums(seqtab.nochim))
+colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
+rownames(track) <- sample.names
+write.csv(track, "track.csv")
+```
+
+# Assign taxonomy using the UNITE database (ensure the correct path to database file)
+```{r}
+taxa <- assignTaxonomy(seqtab.nochim, "D:/Sequences/.../sh_general_release_dynamic_25.07.2023.fasta", multithread=TRUE)
+head(taxa) # View assigned taxonomy
+write.csv2(taxa, "micobiome.csv")
+```
+
+# Calculate mean sequence length (requires a FASTA file of ASVs)
+```{r}
+library(seqinr)
+fs <- read.fasta(file = "micobiome.fasta")
+le <- getLength(fs)
+mean(le) # Compute mean sequence length
+
+writeLines(capture.output(sessionInfo()), "session_info.txt")
+```
+
+
