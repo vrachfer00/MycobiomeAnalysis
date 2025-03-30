@@ -1,0 +1,357 @@
+---
+ title: "Mycobiome statistical analysis"
+ author: 
+    - name: "Rachelle Fernández-Vargas"
+    affiliation: "University of Costa Rica"
+    - name: "Keilor Rojas-Jiménez"
+    affiliation: "University of Costa Rica"
+ description: |
+   Statistical analysis and visualization of ITS metabarcoding data 
+   including alpha diversity, NMDS, PERMANOVA and Venn diagram
+inputs:
+   - 3biom-Mycobiome.xlsx (raw data)
+   - Venn.xlsx
+ outputs:
+   - Figure1-RelAbundOrder-nod.png
+   - Figure2a-Diversity.pdf
+   - Figure2b-Diversity.png
+   - Figure3-NMDS.png
+   - venn_diagram.png
+
+ repository: "https://github.com/vrachfer00/MycobiomeAnalysis.git"
+---
+
+Set working directory to the location of the result files (update to match your data location)
+```{r}
+setwd("D:/Sequences/...")
+
+# Create a new directory for storing extracted ITS data (if not already created)
+dir.create("1Extraction-ITS")
+
+```
+
+Load required libraries for data manipulation, visualization, and analysis
+```{r}
+library(tidyr)
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(vegan)
+library(RColorBrewer)
+```
+
+Load the dataset from the Excel file
+```{r}
+#The "RelAbundOrder" sheet contains relative abundance data for fungal orders
+data <- read_excel("3biom-Mycobiome.xlsx",sheet= "RelAbundOrder")%>% 
+  pivot_longer(cols =   Pleosporales:Other, 
+               names_to = "Class", 
+               values_to = "valor")
+data
+
+# Generate a color palette based on the number of unique fungal classes in the data
+cols <- colorRampPalette(brewer.pal(12, "Paired"))
+myPal <- cols(length(unique(data$Class)))
+```
+
+Create a stacked bar plot showing relative abundance of fungal classes per sample
+```{r}
+# Data is grouped by nodulation status
+ggplot(data=data, aes(x=Sample, y=valor,fill=Class))+
+  geom_bar(stat = "identity")+ 
+  facet_wrap(~ Nodulation,scales="free_x")+
+  scale_fill_manual(values = myPal)+
+  theme_bw()+ylab("Relative Abundance") + xlab("")+  
+  theme(plot.title = element_text(hjust = 0,size = 8, face="bold"),
+        axis.text.x = element_text(size=8,angle = 90,vjust = 0.5, hjust=1),
+        axis.text.y = element_text(size = 8),
+        axis.title.y = element_text(size = 8),
+        axis.title.x = element_blank(),
+        legend.text = element_text(size = 7),
+        legend.position = "right",
+        legend.key.size = unit(0.3, "cm"),
+        legend.title = element_blank())
+ggsave("Figure1-RelAbundOrder-nod.png",width = 17.5, height = 8.5, units = "cm",dpi = 300)
+```
+
+
+########## Diversity  ############
+```{r}
+#Load necessary libraries for data manipulation, visualization, and diversity analysis
+library(ggplot2)
+library(dplyr)
+library(Hmisc)
+library(tidyr)
+library(vegan)
+library(dplyr)
+library(grid)
+library(plotrix)
+library(fossil)
+```
+
+Read environmental data from an Excel file (contains metadata for samples)
+```{r}
+env <- read_excel("3biom-Mycobiome.xlsx", sheet= "nmds")
+env  # Display the environmental data
+```
+
+Read microbial diversity data from a CSV file
+```{r}
+div <- read.csv2("nmds.csv", header=T, sep=";", row.names=1)
+```
+
+Normalize abundance data using total sum scaling (each row sums to 1)
+```{r}
+div <- decostand(div, "total")
+str(div)  # Check the structure of the transformed data
+```
+
+Calculate alpha diversity indices
+```{r}
+Richness <- rowSums(div > 0)       # Count of unique taxa (ASV richness)
+Shannon <- diversity(div)          # Shannon entropy index (measures diversity)
+Pielou <- Shannon/log(Richness)    # Pielou's evenness index (measures species evenness)
+```
+
+Create a dataframe to store calculated diversity indices
+```{r}
+diversity <- data.frame(Richness, Shannon, Pielou)
+write.csv2(diversity, "div.csv")  # Save diversity data to a CSV file
+```
+
+Read processed diversity data from a CSV file
+```{r}
+diver <- read.csv2("div1.csv", header=T, sep=";")
+str(diver)  # Check the structure of the dataframe
+```
+
+
+Create boxplots to visualize diversity metrics across species and nodulation status
+```{r}
+a1 = ggplot(diver, aes(factor(Species), Richness)) + 
+  geom_boxplot() + facet_wrap(~ Nodulation, scales="free_x") +
+  theme_bw() + ylab("ASV Richness") + xlab("") + 
+  theme(axis.text.x = element_blank(), 
+        axis.title.y = element_text(size=9, face="bold"),
+        axis.ticks.x = element_blank())
+
+a2 = ggplot(diver, aes(factor(Species), Shannon)) + 
+  geom_boxplot() + facet_wrap(~ Nodulation, scales="free_x") +
+  theme_bw() + ylab("Shannon Index") + xlab("") + 
+  theme(axis.text.x = element_blank(), 
+        axis.title.y = element_text(size=9, face="bold"),
+        axis.ticks.x = element_blank())
+
+a3 = ggplot(diver, aes(factor(Species), Pielou)) + 
+  geom_boxplot() + facet_wrap(~ Nodulation, scales="free_x") +
+  theme_bw() + ylab("Pielou") + xlab("") + 
+  theme(axis.text.x = element_text(size=9, face="bold.italic", angle=90, vjust=0.5, hjust=1),
+        axis.title.y = element_text(size=9, face="bold"),
+        axis.ticks.x = element_blank())
+```
+
+Save the plots as a PDF file
+```{r}
+library(patchwork)  # For arranging multiple plots
+pdf("Figure2a-Diversity.pdf", width=3.4, height=7)
+a1 / a2 / a3  # Arrange plots vertically
+dev.off()
+```
+
+Compare diversity metrics between nodulation categories
+```{r}
+b1 = ggplot(diver, aes(factor(Nodulation), Richness)) + 
+  geom_boxplot() + geom_jitter(width = 0.1) + 
+  geom_text(data = NULL, x = 1.5, y = 185, label = "P=0.0002*", size=3) +
+  theme_bw() + ggtitle("A") + ylab("ASV Richness") + xlab("") + 
+  theme(plot.title = element_text(size=9, face="bold"), 
+        axis.text.x = element_blank(),
+        axis.title.y = element_text(size=9, face="bold"),
+        axis.ticks.x = element_blank())
+
+b2 = ggplot(diver, aes(factor(Nodulation), Shannon)) + 
+  geom_boxplot() + geom_jitter(width = 0.1) + 
+  geom_text(data = NULL, x = 1.5, y = 3.5, label = "P=0.003*", size=3) +
+  theme_bw() + ylab("Shannon Index") + xlab("") + 
+  theme(axis.text.x = element_text(size=8, face="bold"),
+        axis.title.y = element_text(size=9, face="bold"),
+        axis.ticks.x = element_blank())
+```
+
+Perform Wilcoxon tests to compare diversity metrics between nodulation groups
+```{r}
+wilcox.test(Richness ~ Nodulation, data = diver)  # P=0.0002
+wilcox.test(Shannon ~ Nodulation, data = diver)   # P=0.003
+wilcox.test(Pielou ~ Nodulation, data = diver)    # P>0.05 (not significant)
+```
+
+Compare diversity metrics between plant subfamilies
+```{r}
+b4 = ggplot(diver, aes(factor(Subfamily), Richness)) + 
+  geom_boxplot() + geom_jitter(width = 0.1) + 
+  geom_text(data = NULL, x = 1.5, y = 185, label = "P>0.05", size=3) +
+  theme_bw() + ggtitle("B") + ylab("") + xlab("") + 
+  theme(plot.title = element_text(size=9, face="bold"),
+        axis.text.x = element_blank(),
+        axis.title.y = element_text(size=9, face="bold"),
+        axis.ticks.x = element_blank())
+
+b5 = ggplot(diver, aes(factor(Subfamily), Shannon)) + 
+  geom_boxplot() + geom_jitter(width = 0.1) + 
+  geom_text(data = NULL, x = 1.5, y = 3.5, label = "P>0.05", size=3) +
+  theme_bw() + ylab("") + xlab("") + 
+  theme(axis.text.x = element_text(size=8, face="bold"),
+        axis.title.y = element_text(size=9, face="bold"),
+        axis.ticks.x = element_blank())
+```
+
+Perform Wilcoxon tests for subfamily comparisons
+```{r}
+wilcox.test(Richness ~ Subfamily, data = diver)  # P>0.05
+wilcox.test(Shannon ~ Subfamily, data = diver)   # P>0.05
+wilcox.test(Pielou ~ Subfamily, data = diver)    # P>0.05
+```
+
+Combine plots for final visualization
+```{r}
+library(patchwork)
+(b1 + b4) / (b2 + b5)  # Arrange plots in a grid
+```
+
+Save the final figure as a PNG file
+```{r}
+ggsave("Figure2b-Diversity.png", width = 13, height = 15, units = "cm", dpi = 300)
+```
+
+############ NMDS ###############
+```{r}
+#Load necessary libraries 
+library(ggplot2)
+library(dplyr)
+library(vegan)
+library(Hmisc)
+library(tidyr)
+```
+
+Read the species abundance data (community matrix)
+```{r}
+nmds <- read.csv2("nmdsorder.csv", header=TRUE, row.names=1)  # Load species data
+str(nmds) 
+```
+
+Read the environmental data (metadata)
+```{r}
+env <- read.csv2("env.csv", header=TRUE, row.names=1)  # Load environmental variables
+str(env)
+```
+
+Standardize the community matrix
+```{r}
+nmds <- decostand(nmds, "total")  # Standardization using total sum scaling
+```
+
+Perform Non-Metric Multidimensional Scaling (NMDS)
+```{r}
+nmds <- metaMDS(nmds, trace = FALSE)  # Run NMDS without verbose output
+nmds  # Display the NMDS results
+```
+
+Extract NMDS coordinates and create a dataframe for plotting
+```{r}
+data.scores = as.data.frame(nmds$points)  # Convert NMDS scores to a dataframe
+data.scores$Dominance <- rownames(data.scores)  # Add row names as a new column
+
+grp <- env$Nodulation  # Extract the nodulation status from environmental data
+data.scores$Nodulation <- grp  # Add nodulation status to the NMDS scores dataframe
+
+data.scores  # View the processed NMDS scores
+```
+
+Generate NMDS plot
+```{r}
+#pdf("Figure3b-NMDS.pdf",width=5,height= 4)  # Optionally save as a PDF
+ggplot(data = data.scores, aes(x = MDS1, y = MDS2)) + 
+  geom_point(data = data.scores, aes(colour = Nodulation), size = 3, alpha = 0.5) + 
+  stat_ellipse(aes(color = Nodulation)) +
+  geom_text(data=data.scores,aes(x=MDS1,y=MDS2,label=Dominance),size=1.8,vjust=2) +
+  geom_text(aes(0.25,1.5, label = "Permanova, P=0.004*"),size=2.5)+
+  ggtitle("")+ ylab("NMDS2") + xlab("NMDS1")+
+  theme(panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "grey30"), 
+        plot.title = element_text(size = 9, face="bold"),
+        axis.text.x = element_text(size = 7),
+        axis.text.y = element_text(size = 7),
+        axis.title.x = element_text(size = 8),
+        axis.title.y = element_text(size = 8),
+        legend.direction = "vertical",
+        legend.text = element_text(size = 6), 
+        legend.title = element_blank(),
+        legend.key.size = unit(0.4, "cm"))
+
+ggsave("Figure3-NMDS.png",width = 10, height = 10, units = "cm",dpi = 300)
+```
+
+###### PERMANOVA Analysis ######
+
+```{r}
+per <- read.csv2("nmdsorder.csv", header=TRUE, row.names=1)
+per <- decostand(per, "total")  # Standardize data again
+
+env <- read.csv2("env.csv", header=T)  # Reload environmental data
+```
+
+
+Perform Constrained Correspondence Analysis (CCA) and PERMANOVA
+```{r}
+# Test the effect of Nodulation on community composition
+Nod <- cca(per ~ Nodulation, env)  # Perform CCA
+anova(Nod, step=1000)  # Test significance of Nodulation effect
+adonis2(per ~ Nodulation, env, perm=1000)  # Run PERMANOVA (P=0.004, significant effect)
+```
+
+
+Test the effect of Subfamily on community composition
+```{r}
+Sub <- cca(per ~ Subfamily, env)
+anova(Sub, step=1000)
+adonis2(per ~ Subfamily, env, perm=1000)  # P > 0.05, no significant effect
+```
+
+
+#############VENN######################
+
+```{r}
+# Install necessary packages 
+install.packages("ggvenn")    
+install.packages("RColorBrewer") 
+# Load required libraries
+library(ggvenn)        
+library(RColorBrewer)  
+```
+
+Extract and format data for nodulating 
+```{r}
+Venn <- read.xlsx("Venn.xlsx", sheet = 1)#Load your datafile
+Nod.Positive <- Venn$Positive  # Extract "Positive" group 
+Nod.Positive <- as.character(Nod.Positive) # Convert to character format (ensures compatibility for Venn diagram)
+```
+
+Extract and format data for non-nodulating 
+```{r}
+Nod.Negative <- Venn$Negative  # Extract "Negative" group 
+Nod.Negative <- as.character(Venn$Negative)
+```
+
+Create a list containing both groups for Venn diagram plotting
+```{r}
+x <- list(Nod.Positive=Nod.Positive , Nod.Negative=Nod.Negative)
+
+# Generate a Venn diagram showing only percentages
+venn_plot <- ggvenn(x)
+
+#Save the diagram in a PNG file
+ggsave("venn_diagram.png", plot = venn_plot, width = 6, height = 6, dpi = 300)
+```
+
+
+
