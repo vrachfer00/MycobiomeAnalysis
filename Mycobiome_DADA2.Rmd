@@ -3,7 +3,7 @@
  authors: 
    - name: "Rachelle Fernández-Vargas"
     affiliation: "University of Costa Rica"
-  - name: "Keilor Rojas-Jiménez"
+   - name: "Keilor Rojas-Jiménez"
     affiliation: "University of Costa Rica"
  description: |
    DADA2 workflow for processing Illumina paired-end ITS fungal sequences.
