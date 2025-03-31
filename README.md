@@ -10,13 +10,13 @@ For details regarding the software, parameters, and pipeline workflow, refer to 
 1. **Data preprocessing and taxonomic assignment** 
    - Code is in the file Mycobiome_DADA2.Rmd
    - Tool: DADA2 (R package, version 1.34.0)
-   - Requirements:
+   - Inputs:
       - FASTQ sequencing files
       - UNITE database (sh_general_release_dynamic_25.07.2023.fasta)
 
 2. **Statistical analysis and visualization**
    - Code is in the file Mycobiome_StatysticalAnalysis.Rmd
    - Tool: Vegan (R package, version 2.6.10)
-   - Requirements:
+   - Inputs:
       - Example dataset (provided in the repository)
 
